@@ -7,6 +7,7 @@ st.title("📚 Multi-Document RAG Chatbot")
 
 option = st.sidebar.selectbox("Choose Mode", ["Ingest", "Chat"])
 
+
 # ---------- INGEST ----------
 if option == "Ingest":
     if st.button("Process Documents"):
@@ -18,6 +19,7 @@ if option == "Ingest":
         process_and_store(docs)
         st.success("Documents indexed!")
 
+
 # ---------- CHAT ----------
 elif option == "Chat":
     query = st.text_input("Ask something")
@@ -28,18 +30,29 @@ elif option == "Chat":
     )
 
     if st.button("Ask"):
-        docs = retrieve(query, None if filter_type == "All" else filter_type)
 
-        if not docs:
-            st.warning("No relevant documents found")
+        if not query:
+            st.warning("Please enter a question")
         else:
-            context = "\n".join([d.page_content for d in docs])
+            docs = retrieve(query, None if filter_type == "All" else filter_type)
 
-            answer = ask_llm(context, query)
+            if not docs:
+                st.warning("No relevant documents found")
+            else:
+                # 🔥 limit context
+                context = "\n".join([d.page_content for d in docs[:3]])
 
-            st.write("### Answer:")
-            st.write(answer)
+                answer = ask_llm(context, query)
 
-            st.write("### Sources:")
-            for d in docs:
-                st.write(d.metadata)
+                st.write("### Answer:")
+                st.write(answer)
+
+                st.write("### Sources:")
+
+                # 🔥 remove duplicate sources
+                seen = set()
+                for d in docs:
+                    source = d.metadata.get("source")
+                    if source not in seen:
+                        st.write(d.metadata)
+                        seen.add(source)
