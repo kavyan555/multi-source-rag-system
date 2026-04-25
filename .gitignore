@@ -1,0 +1,16 @@
+# Secrets
+.env
+
+# Vector DB (can be regenerated)
+vectorstore/
+
+# Virtual Environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
