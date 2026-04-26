@@ -1,91 +1,84 @@
-import os
-import pandas as pd
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain_core.documents import Document
-from bs4 import BeautifulSoup
+import pandas as pd
+from docx import Document as DocxDocument
 import requests
+from bs4 import BeautifulSoup
+from PyPDF2 import PdfReader
+import os
 
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from config import *
-
-
-# ---------- LOADERS ----------
-
-def load_pdfs(folder):
-    docs = []
-    for file in os.listdir(folder):
-        if file.endswith(".pdf"):
-            loader = PyPDFLoader(os.path.join(folder, file))
-            data = loader.load()
-            for d in data:
-                d.metadata["source"] = file
-                d.metadata["type"] = "pdf"
-            docs.extend(data)
-    return docs
+# ---------------- PDF ----------------
+def load_pdf(path):
+    reader = PdfReader(path)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text() or ""
+    return text
 
 
-def load_docx(folder):
-    docs = []
-    for file in os.listdir(folder):
-        if file.endswith(".docx"):
-            loader = Docx2txtLoader(os.path.join(folder, file))
-            data = loader.load()
-            for d in data:
-                d.metadata["source"] = file
-                d.metadata["type"] = "docx"
-            docs.extend(data)
-    return docs
+# ---------------- DOCX ----------------
+def load_docx(path):
+    doc = DocxDocument(path)
+    return "\n".join([p.text for p in doc.paragraphs])
 
 
-def load_csv(folder):
-    docs = []
-    for file in os.listdir(folder):
-        if file.endswith(".csv"):
-            df = pd.read_csv(os.path.join(folder, file))
-            for _, row in df.iterrows():
-                docs.append(Document(
-                    page_content=f"Region: {row['region']}, Product: {row['product']}, Revenue: {row['revenue']}, Month: {row['month']}",
-                    metadata={"source": file, "type": "csv"}
-                ))
-    return docs
+# ---------------- CSV ----------------
+def load_csv(path):
+    df = pd.read_csv(path)
+    return df.to_csv(index=False)   # ✅ FIXED
 
 
+# ---------------- WEB ----------------
 def load_web(url):
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
-    text = soup.get_text()
-    return [Document(page_content=text, metadata={"source": url, "type": "web"})]
+    try:
+        res = requests.get(url, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
+
+        # remove unwanted tags
+        for script in soup(["script", "style"]):
+            script.extract()
+
+        return soup.get_text(separator="\n")
+
+    except:
+        return ""
 
 
-# ---------- PROCESSING ----------
-
-def process_and_store(all_docs):
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP
-    )
-
-    chunks = splitter.split_documents(all_docs)
-
-    # remove duplicates
-    unique_chunks = list({c.page_content: c for c in chunks}.values())
-
-    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-
-    db = FAISS.from_documents(unique_chunks, embeddings)
-
-    db.save_local(VECTOR_DB_PATH)
-
-    print("✅ Vector DB created")
-
-if __name__ == "__main__":
+# ---------------- MAIN ----------------
+def load_all_documents(base_path="data"):
     docs = []
-    docs += load_pdfs("data/pdfs")
-    docs += load_docx("data/docs")
-    docs += load_csv("data/csvs")
 
-    print(f"Loaded {len(docs)} documents")
+    for folder in os.listdir(base_path):
+        folder_path = os.path.join(base_path, folder)
 
-    process_and_store(docs)
+        # ✅ Skip if not directory
+        if not os.path.isdir(folder_path):
+            continue
+
+        for file in os.listdir(folder_path):
+            path = os.path.join(folder_path, file)
+
+            text = ""
+
+            if file.endswith(".pdf"):
+                text = load_pdf(path)
+
+            elif file.endswith(".docx"):
+                text = load_docx(path)
+
+            elif file.endswith(".csv"):
+                text = load_csv(path)
+
+            elif file.endswith(".txt"):
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    text = f.read()
+
+            if text.strip():
+                docs.append(Document(
+                    page_content=text,
+                    metadata={
+                        "source": file,
+                        "department": folder   # ✅ IMPORTANT FIX
+                    }
+                ))
+
+    return docs
